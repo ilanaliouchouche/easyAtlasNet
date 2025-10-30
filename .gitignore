@@ -1,0 +1,122 @@
+# Python .gitignore template
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+env/
+venv/
+ENV/
+.venv/
+venv.bak/
+venv/
+.env
+.env.*
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+test-results/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+jupyter_runtime/
+*.ipynb
+
+# IPython
+profile_default/
+ipython_config.py
+
+# Django
+db.sqlite3
+media/
+staticfiles/
+
+# Flask
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# Pyre / mypy / pytype caches
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Sublime
+*.sublime-project
+*.sublime-workspace
+
+# Editor backups and OS files
+*~
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite3
+*.db
+
+# Secrets and credentials
+.env
+.env.*.local
+secrets.yml
+credentials.json
+
+# Test Notebooks
+test.ipynb
