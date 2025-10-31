@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 @dataclass
 class PointNetConfig:
-    n_cls: int
     inp_dim: int = 3
     cls_hidden_dims: tuple[int] = (512, 256)
     mlp2_hidden_dims: tuple[int] = (64, 128, 1024)
@@ -108,7 +107,7 @@ class PointNetfeat(nn.Module):
         return global_feature, T_feat, x_feat
 
 
-class PointNetCls(nn.Module):
+class PointNetEncoder(nn.Module):
 
     def __init__(self,
                  config: PointNetConfig) -> None:
@@ -118,35 +117,17 @@ class PointNetCls(nn.Module):
 
         self.features_extractor = PointNetfeat(config)
 
-        def linear_block(fin, fout, with_act=True):
-            layers = [nn.Linear(fin, fout, bias=not (config.use_bn and with_act))]
-            if with_act:
-                if config.use_bn:
-                    layers.append(nn.BatchNorm1d(fout))
-                layers.append(nn.ReLU(inplace=True))
-            return nn.Sequential(*layers)
-
-        cls_hidden_dims = [config.mlp2_hidden_dims[-1]] + list(config.cls_hidden_dims) + [config.n_cls]
-
-        self.cls_layer = nn.Sequential(
-            *[linear_block(cls_hidden_dims[i],
-                           cls_hidden_dims[i + 1],
-                           i != (len(cls_hidden_dims) - 2))
-              for i in range(len(cls_hidden_dims) - 1)]
-        )
-
     def forward(self,
                 x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 
         x = x.transpose(2, 1)
         x, T_feat, _ = self.features_extractor(x)
-        out = self.cls_layer(x)
-        return out, T_feat
+        return x, T_feat
 
 
 if __name__ == "__main__":
-    config = PointNetConfig(n_cls=10)
-    model = PointNetCls(config)
+    config = PointNetConfig()
+    model = PointNetEncoder(config)
     model.eval()
     x = torch.randn(4, 1024, 3)
     with torch.inference_mode():
