@@ -33,9 +33,12 @@ class AtlasnetDecoder(nn.Module):
                 modules_mlp.extend([
                     nn.Conv1d(config.mlp_dims[i], config.mlp_dims[i + 1], 1),
                     nn.BatchNorm1d(config.mlp_dims[i + 1]) if config.use_bn else nn.Identity(),
-                    nn.Tanh() if i==(len(config.mlp_dims)-1) else nn.ReLU()
+                    nn.ReLU(inplace=True)
                 ])
-            modules_mlp.append(nn.Conv1d(config.mlp_dims[-1], config.output_dim, 1))
+            modules_mlp.extend([
+                nn.Conv1d(config.mlp_dims[-1], config.output_dim, 1),
+                nn.Tanh()
+            ])
             return modules_mlp
 
         self.k_mlps = nn.ModuleList(
@@ -62,7 +65,8 @@ class AtlasnetDecoder(nn.Module):
     def forward(self,
                 x: torch.Tensor) -> torch.Tensor:
 
-        assert x.shape[-1] == self.config.latent_dim
+        if x.size(-1) != self.config.latent_dim:
+            raise ValueError(f"Expected latent_dim {self.config.latent_dim}, got {x.size(-1)}")
 
         uv_points = self._sampling_square(x.shape[0], x.device)
         x_k = torch.cat([
