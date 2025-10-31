@@ -126,6 +126,7 @@ checkpoints/
 
 # runs
 runs/
+outputs/
 
 # data
 off/
