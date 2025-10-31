@@ -68,7 +68,7 @@ def train_autoencoder(
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
     augment_params = {"jitter_std": 0.02, "jitter_clip": 0.05, "scale_min": 2.0 / 3.0, "scale_max": 3.0 / 2.0}
-    collate_train = atlasnet_collate_fn(2500, augment=True, augment_params=augment_params)
+    collate_train = atlasnet_collate_fn(2500, augment=False, augment_params=augment_params)
     collate_val = atlasnet_collate_fn(2500, augment=False)
     pin_memory = torch.cuda.is_available() or torch.backends.mps.is_available()
     train_loader = DataLoader(
