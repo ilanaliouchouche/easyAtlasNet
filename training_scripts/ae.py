@@ -68,7 +68,7 @@ def train_autoencoder(
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
     augment_params = {"jitter_std": 0.02, "jitter_clip": 0.05, "scale_min": 2.0 / 3.0, "scale_max": 3.0 / 2.0}
-    collate_train = atlasnet_collate_fn(2500, augment=False, augment_params=augment_params)
+    collate_train = atlasnet_collate_fn(2500, augment=True, augment_params=augment_params)
     collate_val = atlasnet_collate_fn(2500, augment=False)
     pin_memory = torch.cuda.is_available() or torch.backends.mps.is_available()
     train_loader = DataLoader(
@@ -108,6 +108,7 @@ def train_autoencoder(
         encoder_options={"trainable": True},
         decoder_options={"k_patches": 50, "total_n_points": 2500},
         scheduler_config={"type": "StepLR", "step_size": 40, "gamma": 0.1},
+        device= "cuda" if torch.cuda.is_available() else "cpu",
     )
     trainer = AtlasNetTrainerAE(config)
     trainer.train(train_loader, val_loader)
