@@ -8,6 +8,7 @@ from dataclasses import dataclass, asdict, fields, is_dataclass
 from typing import Any, Iterable, Tuple
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import torch
 from torch import Tensor, nn, optim
 from torch.utils.data import DataLoader
@@ -397,19 +398,30 @@ class AtlasNetTrainer(ABC):
         x_gt_np = x_gt[0].numpy()
         y_pred_np = reconstruction[0].numpy()
 
-        fig_pc = plt.figure(figsize=(8, 4))
-        ax1 = fig_pc.add_subplot(121, projection="3d")
-        ax1.scatter(x_gt_np[:, 0], x_gt_np[:, 1], x_gt_np[:, 2], c="b", s=2)
-        ax1.set_title("Ground Truth")
-        ax2 = fig_pc.add_subplot(122, projection="3d")
-        ax2.scatter(y_pred_np[:, 0], y_pred_np[:, 1], y_pred_np[:, 2], c="r", s=2)
-        ax2.set_title("Reconstruction")
-        self.writer.add_figure("reconstruction/pointcloud", fig_pc, epoch)
-        plt.close(fig_pc)
-
         points_per_patch = decoder_output.size(2)
         resolution = max(1, round(points_per_patch**0.5))
         faces = generate_mesh_faces(resolution, resolution, self.decoder.config.k_patches, device="cpu")
+
+        fig_pc = plt.figure(figsize=(12, 4))
+        ax1 = fig_pc.add_subplot(131, projection="3d")
+        ax1.scatter(x_gt_np[:, 0], x_gt_np[:, 1], x_gt_np[:, 2], c="b", s=2)
+        ax1.set_title("Ground Truth")
+        ax2 = fig_pc.add_subplot(132, projection="3d")
+        ax2.scatter(y_pred_np[:, 0], y_pred_np[:, 1], y_pred_np[:, 2], c="r", s=2)
+        ax2.set_title("Reconstruction")
+
+        ax3 = fig_pc.add_subplot(133, projection="3d")
+        if faces.numel() > 0:
+            faces_np = faces.numpy()
+            tri_vertices = y_pred_np[faces_np]
+            mesh = Poly3DCollection(tri_vertices, alpha=0.35, edgecolor="k")
+            mesh.set_facecolor((1.0, 0.3, 0.3, 0.35))
+            ax3.add_collection3d(mesh)
+        ax3.scatter(y_pred_np[:, 0], y_pred_np[:, 1], y_pred_np[:, 2], c="r", s=1)
+        ax3.set_title("Triangle Mesh")
+        self.writer.add_figure("reconstruction/pointcloud", fig_pc, epoch)
+        plt.close(fig_pc)
+
         mesh_vertices = torch.from_numpy(y_pred_np).unsqueeze(0).float()
         self.writer.add_mesh(
             "reconstruction/mesh",
