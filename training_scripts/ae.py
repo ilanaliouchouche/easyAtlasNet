@@ -106,7 +106,7 @@ def train_autoencoder(
         log_val_step_interval=metric_interval,
         log_image_step_interval=image_interval,
         encoder_options={"trainable": True},
-        decoder_options={"k_patches": 50, "total_n_points": 2500},
+        decoder_options={"k_patches": 25, "total_n_points": 2500},
         scheduler_config={"type": "StepLR", "step_size": 40, "gamma": 0.1},
         device= "cuda" if torch.cuda.is_available() else "cpu",
     )
