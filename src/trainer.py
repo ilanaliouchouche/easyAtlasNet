@@ -481,7 +481,14 @@ class AtlasNetTrainer(ABC):
         payload = self._checkpoint_state(include_optimizer)
         torch.save(payload, path)
 
-    def _apply_checkpoint(self, checkpoint: dict[str, Any], *, strict: bool = True, load_optimizer: bool = True) -> None:
+    def _apply_checkpoint(
+        self,
+        checkpoint: dict[str, Any],
+        *,
+        strict: bool = True,
+        load_optimizer: bool = True,
+        overrides: dict[str, Any] | None = None,
+    ) -> None:
         self.encoder.load_state_dict(checkpoint["encoder_state"], strict=strict)
         self.decoder.load_state_dict(checkpoint["decoder_state"], strict=strict)
         optimizer_loaded = False
@@ -509,6 +516,15 @@ class AtlasNetTrainer(ABC):
             if is_dataclass(decoder_cfg_state):
                 decoder_cfg_state = asdict(decoder_cfg_state)
             self._decoder_options = decoder_cfg_state
+        if overrides:
+            for key, value in overrides.items():
+                if not hasattr(self.cfg, key):
+                    continue
+                setattr(self.cfg, key, value)
+                if key == "encoder_options":
+                    self._encoder_options = dict(value) if value is not None else {}
+                if key == "decoder_options":
+                    self._decoder_options = value if value is not None else {}
         self.cfg.encoder_options = dict(self._encoder_options)
         self.cfg.decoder_options = asdict(self.decoder.config)
         self._decoder_options = self.cfg.decoder_options
@@ -560,7 +576,12 @@ class AtlasNetTrainer(ABC):
         if overrides:
             cfg_dict.update(overrides)
         trainer = cls(TrainerConfig(**cfg_dict))
-        trainer._apply_checkpoint(checkpoint, strict=strict, load_optimizer=load_optimizer)
+        trainer._apply_checkpoint(
+            checkpoint,
+            strict=strict,
+            load_optimizer=load_optimizer,
+            overrides=overrides,
+        )
         return trainer
 
 
