@@ -3,8 +3,8 @@ from torch import nn
 from collections import namedtuple
 
 
-def champfer_loss(output: torch.Tensor,  # B, N, 2
-                  ground_truth: torch.Tensor  # B, M, 2
+def chamfer_loss(output: torch.Tensor,  # B, N, 3
+                  ground_truth: torch.Tensor  # B, M, 3
                   ) -> torch.Tensor:
     
     diff = output[:, :, None, :] - ground_truth[:, None, :, :]  # B, N, M, 3
@@ -16,6 +16,32 @@ def champfer_loss(output: torch.Tensor,  # B, N, 2
     LossDict = namedtuple("LossDict", ["precision", "recall", "total"])
 
     return LossDict(precision=loss_1, recall=loss_2, total=loss_1+loss_2)
+
+def batched_sliced_wasserstein_distance(output: torch.Tensor,  # B, N, 3
+                                        ground_truth: torch.Tensor,  # B, M, 3
+                                        n_projections: int = 100,
+                                        p: int = 1,
+                                        seed: int = None):
+
+    B, N, D = output.shape
+
+    if seed is not None:
+        torch.manual_seed(seed)
+
+    theta = torch.randn(D, n_projections, device=output.device)
+    theta = theta / (theta.norm(dim=0, keepdim=True) + 1e-8)
+
+    Xs_proj = output @ theta  # B, N, n_proj
+    Xt_proj = ground_truth @ theta  # B, M, n_proj
+
+    Xs_sorted, _ = torch.sort(Xs_proj, dim=1)  # B, N, n_proj
+    Xt_sorted, _ = torch.sort(Xt_proj, dim=1)  # B, M, n_proj
+
+    diff = (Xs_sorted - Xt_sorted).abs().pow(p)  # B, N, n_proj
+    swd = diff.mean(dim=1).mean(dim=1).pow(1/p).mean()  # B, n_proj -> B -> ,
+
+    return swd
+
 
 def transform_regularizer(T: torch.Tensor) -> torch.Tensor:  # B, K, K
 

@@ -5,6 +5,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, fields, is_dataclass
+from types import SimpleNamespace
 from typing import Any, Iterable, Tuple
 
 import matplotlib.pyplot as plt
@@ -18,7 +19,12 @@ from tqdm.auto import tqdm
 
 from src.atlasnet import AtlasNetConfig, AtlasnetDecoder
 from src.pointnet import PointNetConfig, PointNetEncoder
-from src.utils import champfer_loss, generate_mesh_faces, transform_regularizer
+from src.utils import (
+    batched_sliced_wasserstein_distance,
+    chamfer_loss,
+    generate_mesh_faces,
+    transform_regularizer,
+)
 
 
 @dataclass
@@ -36,6 +42,7 @@ class TrainerConfig:
     encoder_options: dict[str, Any] | None = None
     decoder_options: dict[str, Any] | None = None
     scheduler_config: dict[str, Any] | None = None
+    reconstruction_loss: str = "chamfer"
 
 
 @dataclass
@@ -57,6 +64,9 @@ class AtlasNetTrainer(ABC):
 
         self._encoder_options = dict(config.encoder_options) if isinstance(config.encoder_options, dict) else {}
         self._decoder_options = config.decoder_options if config.decoder_options is not None else {}
+        self._loss_type = self._normalize_loss_type(config.reconstruction_loss)
+        self._loss_label = "Chamfer" if self._loss_type == "chamfer" else "Sliced Wasserstein"
+        self.cfg.reconstruction_loss = self._loss_type
         self.decoder_config = self._build_decoder_config()
         self.decoder = self._build_decoder().to(self.device)
         self.encoder = self._build_encoder().to(self.device)
@@ -83,6 +93,9 @@ class AtlasNetTrainer(ABC):
             epoch_loss = 0.0
             epoch_precision = 0.0
             epoch_recall = 0.0
+            epoch_chamfer = 0.0
+            epoch_chamfer_precision = 0.0
+            epoch_chamfer_recall = 0.0
 
             progress = tqdm(
                 enumerate(train_loader),
@@ -107,7 +120,7 @@ class AtlasNetTrainer(ABC):
 
                 reconstruction = y_pred.reshape(x_gt.size(0), -1, 3)
 
-                loss_dict = champfer_loss(reconstruction, x_gt)
+                loss_dict, chamfer_dict = self._compute_reconstruction_loss(reconstruction, x_gt)
                 reg_loss = self._regularization(aux)
                 loss = loss_dict.total + reg_loss
                 loss.backward()
@@ -122,6 +135,7 @@ class AtlasNetTrainer(ABC):
                 self.state.global_step += 1
                 self._log_step_metrics(
                     loss_dict=loss_dict,
+                    chamfer_dict=chamfer_dict,
                     param_norm=param_norm,
                     grad_norm=grad_norm,
                     latent=latent.detach(),
@@ -146,6 +160,9 @@ class AtlasNetTrainer(ABC):
                 epoch_loss += loss.item()
                 epoch_precision += loss_dict.precision.item()
                 epoch_recall += loss_dict.recall.item()
+                epoch_chamfer += chamfer_dict.total.item()
+                epoch_chamfer_precision += chamfer_dict.precision.item()
+                epoch_chamfer_recall += chamfer_dict.recall.item()
 
                 progress.set_postfix(
                     loss=f"{loss.item():.4f}",
@@ -154,13 +171,24 @@ class AtlasNetTrainer(ABC):
                     grad=f"{grad_norm:.2f}",
                     lr=f"{self.optimizer.param_groups[0]['lr']:.2e}",
                     regularizer=f"{reg_loss.item():.4f}",
+                    chamfer=f"{chamfer_dict.total.item():.4f}",
                 )
 
             avg_loss = epoch_loss / len(train_loader)
             avg_precision = epoch_precision / len(train_loader)
             avg_recall = epoch_recall / len(train_loader)
+            avg_chamfer = epoch_chamfer / len(train_loader)
+            avg_chamfer_precision = epoch_chamfer_precision / len(train_loader)
+            avg_chamfer_recall = epoch_chamfer_recall / len(train_loader)
 
-            self._log_epoch_metrics(avg_loss, avg_precision, avg_recall)
+            self._log_epoch_metrics(
+                loss=avg_loss,
+                precision=avg_precision,
+                recall=avg_recall,
+                chamfer=avg_chamfer,
+                chamfer_precision=avg_chamfer_precision,
+                chamfer_recall=avg_chamfer_recall,
+            )
             self._log_parameter_distributions(epoch)
             self._update_best_checkpoint(avg_loss)
 
@@ -205,6 +233,33 @@ class AtlasNetTrainer(ABC):
 
     def _regularization(self, aux: Any) -> Tensor:
         return torch.zeros((), device=self.device)
+
+    def _compute_reconstruction_loss(self, reconstruction: Tensor, target: Tensor):
+        if self._loss_type == "chamfer":
+            chamfer = chamfer_loss(reconstruction, target)
+            return chamfer, chamfer
+        swd = batched_sliced_wasserstein_distance(reconstruction, target)
+        zero = torch.zeros_like(swd)
+        chamfer = chamfer_loss(reconstruction, target)
+        return SimpleNamespace(precision=swd, recall=zero, total=swd), chamfer
+
+    @staticmethod
+    def _normalize_loss_type(loss_name: str) -> str:
+        name = str(loss_name).strip().lower()
+        if name in {"chamfer", "chamfer_loss"}:
+            return "chamfer"
+        if name in {
+            "swd",
+            "wasserstein",
+            "sliced",
+            "sliced_wasserstein",
+            "sliced_wasserstein_distance",
+            "sliced_wassertein",
+            "batched_sliced_wasserstein_distance",
+            "batched_sliced_wassertein_distance",
+        }:
+            return "sliced_wasserstein"
+        raise ValueError(f"Unsupported reconstruction loss '{loss_name}'.")
 
     def _build_scheduler(self):
         cfg = self.cfg.scheduler_config
@@ -255,11 +310,14 @@ class AtlasNetTrainer(ABC):
         }
 
         self.writer.add_text("metadata/config", json.dumps(metadata, indent=2))
+        loss_series_label = f"Reconstruction ({self._loss_label})"
         self.writer.add_custom_scalars(
             {
                 "Losses": {
-                    "Chamfer": ["Multiline", ["train/loss_step", "train/loss_epoch"]],
+                    loss_series_label: ["Multiline", ["train/loss_step", "train/loss_epoch"]],
                     "Components": ["Multiline", ["train/loss_precision", "train/loss_recall"]],
+                    "Chamfer": ["Multiline", ["train/chamfer_step", "train/chamfer_epoch"]],
+                    "Chamfer Components": ["Multiline", ["train/chamfer_precision", "train/chamfer_recall"]],
                 },
                 "Optimization": {
                     "Norms": ["Multiline", ["train/param_norm", "train/grad_norm"]],
@@ -288,6 +346,7 @@ class AtlasNetTrainer(ABC):
         self,
         *,
         loss_dict,
+        chamfer_dict,
         param_norm: float,
         grad_norm: float,
         latent: Tensor,
@@ -302,6 +361,9 @@ class AtlasNetTrainer(ABC):
         self.writer.add_scalar("train/loss_step", loss_dict.total.item(), step)
         self.writer.add_scalar("train/loss_precision", loss_dict.precision.item(), step)
         self.writer.add_scalar("train/loss_recall", loss_dict.recall.item(), step)
+        self.writer.add_scalar("train/chamfer_step", chamfer_dict.total.item(), step)
+        self.writer.add_scalar("train/chamfer_precision", chamfer_dict.precision.item(), step)
+        self.writer.add_scalar("train/chamfer_recall", chamfer_dict.recall.item(), step)
         self.writer.add_scalar("train/param_norm", param_norm, step)
         self.writer.add_scalar("train/grad_norm", grad_norm, step)
         self.writer.add_scalar("train/throughput", throughput, step)
@@ -316,19 +378,34 @@ class AtlasNetTrainer(ABC):
             if aux is not None and aux.numel() > 0:
                 self.writer.add_histogram("auxiliary/features", aux.cpu(), step)
 
-    def _log_validation_step_metrics(self, *, loss_dict, reg_loss: Tensor) -> None:
+    def _log_validation_step_metrics(self, *, loss_dict, chamfer_dict, reg_loss: Tensor) -> None:
         step = self.state.val_global_step
         total = loss_dict.total.item() + reg_loss.item()
         self.writer.add_scalar("val/loss_step", total, step)
         self.writer.add_scalar("val/loss_precision", loss_dict.precision.item(), step)
         self.writer.add_scalar("val/loss_recall", loss_dict.recall.item(), step)
+        self.writer.add_scalar("val/chamfer_step", chamfer_dict.total.item(), step)
+        self.writer.add_scalar("val/chamfer_precision", chamfer_dict.precision.item(), step)
+        self.writer.add_scalar("val/chamfer_recall", chamfer_dict.recall.item(), step)
         self.writer.add_scalar("val/regularizer", reg_loss.item(), step)
 
-    def _log_epoch_metrics(self, loss: float, precision: float, recall: float) -> None:
+    def _log_epoch_metrics(
+        self,
+        *,
+        loss: float,
+        precision: float,
+        recall: float,
+        chamfer: float,
+        chamfer_precision: float,
+        chamfer_recall: float,
+    ) -> None:
         epoch = self.state.epoch
         self.writer.add_scalar("train/loss_epoch", loss, epoch)
         self.writer.add_scalar("train/precision_epoch", precision, epoch)
         self.writer.add_scalar("train/recall_epoch", recall, epoch)
+        self.writer.add_scalar("train/chamfer_epoch", chamfer, epoch)
+        self.writer.add_scalar("train/chamfer_precision_epoch", chamfer_precision, epoch)
+        self.writer.add_scalar("train/chamfer_recall_epoch", chamfer_recall, epoch)
         self.writer.add_scalar("train/best_loss", self.state.best_loss, epoch)
 
     def _log_parameter_distributions(self, epoch: int) -> None:
@@ -348,6 +425,9 @@ class AtlasNetTrainer(ABC):
         total_loss = 0.0
         total_precision = 0.0
         total_recall = 0.0
+        total_chamfer = 0.0
+        total_chamfer_precision = 0.0
+        total_chamfer_recall = 0.0
         steps = 0
 
         with torch.no_grad():
@@ -360,12 +440,15 @@ class AtlasNetTrainer(ABC):
                 y_pred = self.decoder(latent)
                 reconstruction = y_pred.reshape(x_gt.size(0), -1, 3)
 
-                loss_dict = champfer_loss(reconstruction, x_gt)
+                loss_dict, chamfer_dict = self._compute_reconstruction_loss(reconstruction, x_gt)
                 reg_loss = self._regularization(aux)
 
                 total_loss += loss_dict.total.item() + reg_loss.item()
                 total_precision += loss_dict.precision.item()
                 total_recall += loss_dict.recall.item()
+                total_chamfer += chamfer_dict.total.item()
+                total_chamfer_precision += chamfer_dict.precision.item()
+                total_chamfer_recall += chamfer_dict.recall.item()
 
                 self.state.val_global_step += 1
                 if (
@@ -374,6 +457,7 @@ class AtlasNetTrainer(ABC):
                 ):
                     self._log_validation_step_metrics(
                         loss_dict=loss_dict,
+                        chamfer_dict=chamfer_dict,
                         reg_loss=reg_loss.detach(),
                     )
 
@@ -385,11 +469,17 @@ class AtlasNetTrainer(ABC):
         avg_loss = total_loss / steps
         avg_precision = total_precision / steps
         avg_recall = total_recall / steps
+        avg_chamfer = total_chamfer / steps
+        avg_chamfer_precision = total_chamfer_precision / steps
+        avg_chamfer_recall = total_chamfer_recall / steps
         epoch = self.state.epoch
 
         self.writer.add_scalar("val/loss_epoch", avg_loss, epoch)
         self.writer.add_scalar("val/precision_epoch", avg_precision, epoch)
         self.writer.add_scalar("val/recall_epoch", avg_recall, epoch)
+        self.writer.add_scalar("val/chamfer_epoch", avg_chamfer, epoch)
+        self.writer.add_scalar("val/chamfer_precision_epoch", avg_chamfer_precision, epoch)
+        self.writer.add_scalar("val/chamfer_recall_epoch", avg_chamfer_recall, epoch)
 
     def _log_reconstructions(self, x_gt: Tensor, reconstruction: Tensor, decoder_output: Tensor, epoch: int) -> None:
         self.encoder.eval()

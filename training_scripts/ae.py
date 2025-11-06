@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Subset
 
 from src.data import DatasetAE, atlasnet_collate_fn
 from src.trainer import AtlasNetTrainerAE, TrainerConfig
-from src.utils import champfer_loss
+from src.utils import chamfer_loss
 
 
 def evaluate_autoencoder(trainer: AtlasNetTrainerAE, dataloader: DataLoader) -> dict[str, float]:
@@ -26,7 +26,7 @@ def evaluate_autoencoder(trainer: AtlasNetTrainerAE, dataloader: DataLoader) -> 
             latent, _ = trainer.encoder(points)
             output = trainer.decoder(latent)
             reconstruction = output.reshape(points.size(0), -1, 3)
-            loss_dict = champfer_loss(reconstruction, points)
+            loss_dict = chamfer_loss(reconstruction, points)
             total_loss += loss_dict.total.item()
             total_precision += loss_dict.precision.item()
             total_recall += loss_dict.recall.item()

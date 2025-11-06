@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from src.data import DatasetAE, atlasnet_collate_fn
 from src.trainer import AtlasNetTrainerAE, TrainerConfig
-from src.utils import champfer_loss
+from src.utils import chamfer_loss
 
 
 class _FixedBatchDataset(Dataset[Tensor]):
@@ -48,7 +48,7 @@ def _evaluate_on_loader(trainer: AtlasNetTrainerAE, dataloader: DataLoader) -> d
             latent, aux = trainer.encoder(inputs)
             preds = trainer.decoder(latent)
             reconstruction = preds.reshape(targets.size(0), -1, 3)
-            loss_dict = champfer_loss(reconstruction, targets)
+            loss_dict = chamfer_loss(reconstruction, targets)
             reg_loss = trainer._regularization(aux)
             total_loss += loss_dict.total.item() + reg_loss.item()
             total_precision += loss_dict.precision.item()
@@ -182,6 +182,7 @@ def main() -> None:
         decoder_options=decoder_options,
         scheduler_config=None,
         device=args.device,
+        # reconstruction_loss="sliced_wasserstein",
     )
 
     trainer = AtlasNetTrainerAE(config)

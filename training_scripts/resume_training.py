@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Subset
 
 from src.data import DatasetAE, atlasnet_collate_fn
 from src.trainer import AtlasNetTrainerAE, TrainerConfig
-from src.utils import champfer_loss
+from src.utils import chamfer_loss
 
 data_dir = 'data'
 output_dir = 'outputs/ae'
